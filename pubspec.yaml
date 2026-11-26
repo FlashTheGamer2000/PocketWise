@@ -1,0 +1,40 @@
+
+name: ags_flutter_starter
+description: "PocketWise personal expense and budget tracker"
+publish_to: 'none'
+
+version: 0.4.0+4
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Existing dependencies
+  cupertino_icons: ^2.0.0
+  shared_preferences: ^2.5.6
+  intl: ^0.20.3
+
+  # Local database
+  sembast: ^3.8.5+2
+  sembast_web: ^2.4.2
+
+  # Database file management
+  path_provider: ^2.1.5
+  path: ^1.9.1
+
+  # Password hashing and security
+  cryptography: ^2.9.0
+
+  # Native sharing functionality
+  share_plus: ^13.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
