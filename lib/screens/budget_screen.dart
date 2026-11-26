@@ -30,7 +30,9 @@ class _BudgetScreenState extends State<BudgetScreen> {
   double get _totalSpent {
     final now = DateTime.now();
     return widget.expenses
-        .where((item) => item.date.year == now.year && item.date.month == now.month)
+        .where(
+          (item) => item.date.year == now.year && item.date.month == now.month,
+        )
         .fold(0.0, (sum, item) => sum + item.amount);
   }
 
@@ -60,96 +62,28 @@ class _BudgetScreenState extends State<BudgetScreen> {
   }
 
   Future<void> _showEditBudgetDialog() async {
-    final controller = TextEditingController(
-      text: widget.monthlyBudget.toStringAsFixed(0),
+    // The dialog owns its TextEditingController. This prevents the parent
+    // screen from disposing the controller while the dialog route is closing.
+    final newBudget = await showDialog<double>(
+      context: context,
+      useSafeArea: true,
+      builder: (_) => _EditBudgetDialog(initialBudget: widget.monthlyBudget),
     );
 
+    // Cancel returns null. No budget update should happen in that case.
+    if (!mounted || newBudget == null) return;
+
     try {
-      await showDialog<void>(
-        context: context,
-        useSafeArea: true,
-        builder: (dialogContext) => AlertDialog(
-          // Let AlertDialog handle scrolling and keyboard insets. Keeping one
-          // scrollable avoids the extra nested scroll view from the old editor.
-          scrollable: true,
-          title: const Text('Update Monthly Budget'),
-          content: TextField(
-            controller: controller,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textInputAction: TextInputAction.done,
-            autofocus: false,
-            decoration: const InputDecoration(
-              labelText: 'Monthly Budget (Rp)',
-              prefixIcon: Icon(Icons.account_balance_wallet_outlined),
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: themeColor,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () async {
-                final parsed = double.tryParse(
-                  controller.text.trim().replaceAll(',', '.'),
-                );
+      await widget.onUpdateBudget(newBudget);
 
-                if (parsed == null || parsed <= 0 || !parsed.isFinite) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Please enter a budget amount greater than zero.',
-                      ),
-                    ),
-                  );
-                  return;
-                }
-
-                try {
-                  await widget.onUpdateBudget(parsed);
-
-                  if (!dialogContext.mounted) return;
-                  Navigator.of(dialogContext).pop();
-
-                  if (!mounted) return;
-                  _showMessage(
-                    'Monthly budget updated to ${_formatCurrency(parsed)}.',
-                  );
-                } catch (error, stackTrace) {
-                  debugPrint(
-                    'PocketWise: failed to save monthly budget: $error',
-                  );
-                  debugPrintStack(stackTrace: stackTrace);
-
-                  if (!dialogContext.mounted) return;
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Could not save the budget. Please try again.',
-                      ),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Save Budget'),
-            ),
-          ],
-        ),
-      );
+      if (!mounted) return;
+      _showMessage('Monthly budget updated to ${_formatCurrency(newBudget)}.');
     } catch (error, stackTrace) {
-      debugPrint('PocketWise: failed to open budget editor: $error');
+      debugPrint('PocketWise: failed to save monthly budget: $error');
       debugPrintStack(stackTrace: stackTrace);
 
-      if (mounted) {
-        _showMessage('Could not open the budget editor. Please try again.');
-      }
-    } finally {
-      controller.dispose();
+      if (!mounted) return;
+      _showMessage('Could not save the budget. Please try again.');
     }
   }
 
@@ -161,7 +95,11 @@ class _BudgetScreenState extends State<BudgetScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final categories = <String>{'All', ...widget.categories, ...widget.expenses.map((item) => item.category)}.toList();
+    final categories = <String>{
+      'All',
+      ...widget.categories,
+      ...widget.expenses.map((item) => item.category),
+    }.toList();
     final filtered = _filteredExpenses;
     final progress = widget.monthlyBudget > 0
         ? (_totalSpent / widget.monthlyBudget).clamp(0.0, 1.0)
@@ -413,6 +351,106 @@ class _BudgetScreenState extends State<BudgetScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Owns the budget input controller for the lifetime of the dialog route.
+/// Returning a double means Save; returning null means Cancel.
+class _EditBudgetDialog extends StatefulWidget {
+  final double initialBudget;
+
+  const _EditBudgetDialog({required this.initialBudget});
+
+  @override
+  State<_EditBudgetDialog> createState() => _EditBudgetDialogState();
+}
+
+class _EditBudgetDialogState extends State<_EditBudgetDialog> {
+  late final TextEditingController _controller;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: widget.initialBudget.toStringAsFixed(0),
+    );
+  }
+
+  void _submit() {
+    final parsed = double.tryParse(
+      _controller.text.trim().replaceAll(',', '.'),
+    );
+
+    if (parsed == null || parsed <= 0 || !parsed.isFinite) {
+      setState(() {
+        _errorMessage = 'Please enter a budget amount greater than zero.';
+      });
+      return;
+    }
+
+    Navigator.of(context).pop<double>(parsed);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      scrollable: true,
+      title: const Text('Update Monthly Budget'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            textInputAction: TextInputAction.done,
+            autofocus: false,
+            onSubmitted: (_) => _submit(),
+            onChanged: (_) {
+              if (_errorMessage != null) {
+                setState(() => _errorMessage = null);
+              }
+            },
+            decoration: const InputDecoration(
+              labelText: 'Monthly Budget (Rp)',
+              prefixIcon: Icon(Icons.account_balance_wallet_outlined),
+              border: OutlineInputBorder(),
+            ),
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage!,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: themeColor,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: _submit,
+          child: const Text('Save Changes'),
+        ),
+      ],
     );
   }
 }
